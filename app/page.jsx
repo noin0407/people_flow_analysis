@@ -1,6 +1,17 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import dynamic from 'next/dynamic';
+
+import StatCard from '@/components/StatCard';
+
+import { useInitialData } from '@/hooks/useInitialData';
+
+const MapView = dynamic(() => import('@/components/MapView'),{
+  ssr: false,
+  loading: () => <div className='absolute inset-0 bg-slate-100 flex items-center justify-center'>Loading Map...</div>
+});
+
 import { 
   Users, 
   Map as MapIcon, 
@@ -32,56 +43,7 @@ import {
   ReferenceLine 
 } from 'recharts';
 
-// --- モックデータの生成 (初期表示用：最新の7列構造に準拠) ---
-const generateMockCsvData = () => {
-  const data = [];
-  const dates = ["2025-01-01", "2025-01-02"];
-  const areas = [
-    { id: 'jp.sendai.sample.1', name: 'ハピナ名掛丁商店街', lat: 38.261976, lng: 140.880226 },
-    { id: 'jp.sendai.sample.2', name: '勾当台公園歴史のゾーン・北', lat: 38.268649, lng: 140.870504 },
-  ];
-  
-  dates.forEach(dateStr => {
-    areas.forEach(area => {
-      for (let h = 0; h < 24; h++) {
-        const hourStr = String(h).padStart(2, '0');
-        const count = (Math.random() * 500 + 100);
-        data.push({
-          dateObservedFrom: `${dateStr}T${hourStr}:00:00+09:00`,
-          peopleCount: parseFloat(count.toFixed(2)),
-          peopleOccupancy: parseFloat((count / 20).toFixed(4)), // occupancyのスケールを実データに合わせる
-          identifcation: area.id,
-          locationName: area.name,
-          latitude: area.lat,
-          longitude: area.lng
-        });
-      }
-    });
-  });
-  return data;
-};
 
-// --- サブコンポーネント: 統計カード ---
-const StatCard = ({ title, value, occupancy, icon: Icon, colorClass }) => (
-  <div className="bg-white/90 backdrop-blur-sm p-4 rounded-2xl border border-slate-200 shadow-lg flex items-start justify-between transition-all hover:scale-[1.02] duration-300">
-    <div className="flex-1 min-w-0">
-      <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1 truncate">{title}</p>
-      <h3 className="text-2xl font-black text-slate-800">{value}</h3>
-      <div className="flex items-center mt-3 gap-2">
-        <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-          <div 
-            className={`h-full transition-all duration-700 ease-out ${occupancy > 30 ? 'bg-rose-500' : occupancy > 10 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
-            style={{ width: `${Math.min(occupancy * 2, 100)}%` }}
-          ></div>
-        </div>
-        <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap">指数: {occupancy.toFixed(2)}</span>
-      </div>
-    </div>
-    <div className={`p-3 rounded-xl ${colorClass} text-white shadow-lg ml-3 flex-shrink-0 animate-pulse-slow`}>
-      <Icon size={20} />
-    </div>
-  </div>
-);
 
 // --- メインコンポーネント ---
 const App = () => {
@@ -93,58 +55,8 @@ const App = () => {
   const [fileName, setFileName] = useState("loading...");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  const mapRef = useRef(null);
-  const leafletMap = useRef(null);
-  const layersRef = useRef({});
-
   // 1. 初期データのセットアップ
-  useEffect(() => {
-    const initialData = generateMockCsvData();
-    setRawData(initialData);
-    setSelectedDate("2025-01-01");
-    setSelectedLocation("ハピナ名掛丁商店街");
-    setFileName("initial_sample.csv");
-  }, []);
-
-  // 2. Leaflet地図の初期化
-  useEffect(() => {
-    if (!document.getElementById('leaflet-css')) {
-      const link = document.createElement('link');
-      link.id = 'leaflet-css';
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(link);
-    }
-
-    const initMap = () => {
-      if (typeof L === 'undefined') return setTimeout(initMap, 100);
-      if (!leafletMap.current && mapRef.current) {
-        leafletMap.current = L.map(mapRef.current, { 
-          zoomControl: false,
-          attributionControl: false 
-        }).setView([38.263, 140.875], 14);
-        
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-          maxZoom: 19
-        }).addTo(leafletMap.current);
-        
-        L.control.zoom({ position: 'bottomright' }).addTo(leafletMap.current);
-      }
-    };
-
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.async = true;
-    script.onload = initMap;
-    document.head.appendChild(script);
-
-    return () => {
-      if (leafletMap.current) {
-        leafletMap.current.remove();
-        leafletMap.current = null;
-      }
-    };
-  }, []);
+  useInitialData({setRawData, setSelectedDate, setSelectedLocation, setFileName});
 
   // 3. データ集計
   const availableDates = useMemo(() => {
@@ -190,55 +102,6 @@ const App = () => {
       }))
       .sort((a, b) => a.hourValue - b.hourValue);
   }, [filteredDataByDate, selectedLocation]);
-
-  // 4. 地図描画
-  useEffect(() => {
-    if (!leafletMap.current || typeof L === 'undefined') return;
-
-    Object.values(layersRef.current).forEach(layer => {
-      if (layer && leafletMap.current.hasLayer(layer)) leafletMap.current.removeLayer(layer);
-    });
-    layersRef.current = {};
-
-    hourlySnapshot.forEach(point => {
-      // 指数の閾値を実データ(10〜40程度)に合わせて調整
-      const color = point.peopleOccupancy > 30 ? '#f43f5e' : point.peopleOccupancy > 10 ? '#f59e0b' : '#10b981';
-      const radius = 20 + (Math.sqrt(point.peopleCount) * 10); 
-
-      try {
-        const circle = L.circle([point.latitude, point.longitude], {
-          color: color,
-          fillColor: color,
-          fillOpacity: 0.6,
-          weight: 2,
-          radius: Math.min(radius, 1000)
-        }).addTo(leafletMap.current);
-
-        const popupContent = `
-          <div style="font-family: sans-serif; min-width: 180px; padding: 5px;">
-            <b style="font-size: 14px; display: block; margin-bottom: 4px;">${point.locationName}</b>
-            <span style="color: #64748b; font-size: 11px;">${selectedHour}:00 時点</span>
-            <div style="margin-top: 8px; font-weight: 800; font-size: 20px; color: #1e293b;">
-              ${Math.round(point.peopleCount).toLocaleString()} <small style="font-size: 11px;">人</small>
-            </div>
-            <div style="font-size: 10px; color: ${color}; font-weight: bold; margin-top: 4px; border-top: 1px solid #f1f5f9; padding-top: 4px;">
-              混雑指数: ${point.peopleOccupancy.toFixed(3)}
-            </div>
-            <div style="font-size: 8px; color: #94a3b8; margin-top: 6px; white-space: normal; line-height: 1.2;">
-              ID: ${point.identifcation}
-            </div>
-          </div>
-        `;
-        circle.bindPopup(popupContent);
-        
-        if (point.locationName === selectedLocation) {
-          circle.setStyle({ weight: 4, color: '#4f46e5', fillOpacity: 0.85 });
-        }
-
-        layersRef.current[point.locationName] = circle;
-      } catch (err) { console.error(err); }
-    });
-  }, [hourlySnapshot, selectedLocation, selectedHour]);
 
   // 5. 再生コントロール
   useEffect(() => {
@@ -400,7 +263,11 @@ const App = () => {
 
         <section className="flex-1 flex flex-col relative bg-slate-100">
           <div className="flex-1 relative">
-            <div ref={mapRef} className="absolute inset-0 z-0" />
+            <MapView 
+              hourlySnapshot={hourlySnapshot} 
+              selectedLocation={selectedLocation} 
+              selectedHour={selectedHour} 
+            />
             <div className="absolute top-6 left-6 z-[1000] w-full max-w-[320px] pointer-events-none">
               <div className="pointer-events-auto space-y-4">
                 <StatCard 
