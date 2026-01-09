@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useState, useMemo } from "react";
 
 import {
   Users,
@@ -23,6 +24,14 @@ import {
 import MapView from "./MapView";
 import StatCard from "./StatCard";
 import { CrowdData } from "@/types";
+
+import {
+  CalculatedLinkVolume,
+  PointData,
+  calculateGravityModelVolumes,
+} from "@/hooks/calculateGravityModelVolumes";
+import GravityLinkLayer from "./GravityLinkLayer";
+import dummyLink from "@/samples/dummyLink.json";
 
 interface MainProps {
   // ステート
@@ -70,6 +79,25 @@ export const Main = ({
     // ここで leafletMap.current.panTo を直接呼ばず、
     // selectedLocation が変わったことを MapView が検知して動くようにします。
   };
+
+  // --- 修正箇所：useState と useEffect をこれに置き換える ---
+  const linkVolumes = useMemo(() => {
+    if (!hourlySnapshot || hourlySnapshot.length === 0) return [];
+
+    const currentPoints: PointData[] = hourlySnapshot.map((d) => ({
+      // ここを CSV のカラム名に厳密に合わせる
+      id: d.locationName,
+      lat: d.latitude,
+      lng: d.longitude,
+      people: d.peopleCount,
+    }));
+
+    return calculateGravityModelVolumes(
+      currentPoints,
+      dummyLink, // インポートした新しいリンクデータ
+      { k: 100, n: 0.5, minD: 100 } // kの値は表示を見て調整してください
+    );
+  }, [hourlySnapshot]); // hourlySnapshot が変わった時だけ再計算される
 
   return (
     <main className="flex-1 flex overflow-hidden relative">
@@ -147,6 +175,7 @@ export const Main = ({
             selectedLocation={selectedLocation}
             selectedHour={selectedHour}
             rawData={rawData}
+            linkVolumes={linkVolumes}
           />
           <div className="absolute top-6 left-6 z-[1000] w-full max-w-[320px] pointer-events-none">
             <div className="pointer-events-auto space-y-4">
