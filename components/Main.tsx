@@ -32,6 +32,7 @@ import {
 } from "@/hooks/calculateGravityModelVolumes";
 import GravityLinkLayer from "./GravityLinkLayer";
 import dummyLink from "@/samples/dummyLink.json";
+import { LinkTraffic } from "@/hooks/useCrowdData";
 
 interface MainProps {
   // ステート
@@ -46,6 +47,7 @@ interface MainProps {
   hourlySnapshot: CrowdData[];
   currentFocus: Partial<CrowdData>;
   chartData: { time: string; count: number; hourValue: number }[];
+  linkTraffic: LinkTraffic[];
 
   // セット関数
   setSelectedLocation: (loc: string) => void;
