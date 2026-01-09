@@ -9,13 +9,41 @@ interface MapViewProps {
   hourlySnapshot: CrowdData[];
   selectedLocation: string;
   selectedHour: number;
+  rawData: CrowdData[];
 }
 
 const MapView = ({
   hourlySnapshot,
   selectedLocation,
   selectedHour,
+  rawData,
 }: MapViewProps) => {
+  useEffect(() => {
+    if (leafletMapRef.current && hourlySnapshot.length > 0) {
+      // データが読み込まれた直後（初期状態など）にその場所へ移動
+      const firstPoint = hourlySnapshot[0];
+      leafletMapRef.current.flyTo(
+        [firstPoint.latitude, firstPoint.longitude],
+        14
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawData]); // rawData が更新されたときだけ実行
+
+  useEffect(() => {
+    if (leafletMapRef.current && selectedLocation) {
+      const selectedPoint = hourlySnapshot.find(
+        (p) => p.locationName === selectedLocation
+      );
+      if (selectedPoint) {
+        leafletMapRef.current.panTo([
+          selectedPoint.latitude,
+          selectedPoint.longitude,
+        ]);
+      }
+    }
+  }, [selectedLocation, hourlySnapshot]);
+
   const mapRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<L.Map | null>(null);
   const layersRef = useRef<{ [key: string]: L.Circle }>({});
