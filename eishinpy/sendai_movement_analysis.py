@@ -97,3 +97,4 @@ print("完了しました！ 'potential_analysis.png' が作成されました�
 
 # 画面に表示（VS Codeの設定によっては出ない場合があります）
 plt.show()
+
