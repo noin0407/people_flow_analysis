@@ -1,68 +1,82 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 
-# ※ データは前回の文脈を引き継ぎ、変数がある前提で処理します
-# もし変数が消えている場合は再定義が必要ですが、ロジックを示します
+# 1. データの読み込み
+df = pd.read_csv('base data.csv')
 
-# 1. ゾーン定義の辞書を作成
-zone_mapping = {
-    'jp.sendai.Blesensor.per3600.1': 'Zone A: 駅前(ハピナ)',
-    'jp.sendai.Blesensor.per3600.2': 'Zone A: 駅前(ハピナ)',
-    'jp.sendai.Blesensor.per3600.3': 'Zone B: 中央(クリス)',
-    'jp.sendai.Blesensor.per3600.4': 'Zone B: 中央(クリス)',
-    'jp.sendai.Blesensor.per3600.5': 'Zone C: 藤崎(マーブル)',
-    'jp.sendai.Blesensor.per3600.6': 'Zone C: 藤崎(マーブル)'
-}
+# 2. データの前処理
+# '商店街'を含む場所のみを抽出
+arcade_df = df[df['LocationName'].str.contains('商店街')].copy()
+arcade_df['Timestamp'] = pd.to_datetime(arcade_df['Timestamp'])
 
-# 2. データのゾーン集計
-# センサーごとの位置情報をゾーンごとに平均して「代表地点」を作る
-sensor_loc_df['Zone'] = sensor_loc_df['identifcation'].map(zone_mapping)
-zone_loc = sensor_loc_df.groupby('Zone')[['緯度', '経度']].mean().reset_index()
+# 時間ごとの各地点の人数を列に持つピボットテーブルを作成
+df_pivot = arcade_df.pivot_table(index='Timestamp', columns='LocationName', values='PeopleCount')
 
-# 人流データをゾーンごとに平均する
-people_flow_df['Zone'] = people_flow_df['identifcation'].map(zone_mapping)
-people_flow_df['dateObservedFrom'] = pd.to_datetime(people_flow_df['dateObservedFrom'])
+# 各地点の緯度経度を取得（平均値を使用）
+locations = arcade_df.groupby('LocationName').agg({'Latitude': 'mean', 'Longitude': 'mean'}).reset_index()
 
-# 時間 x ゾーン ごとの平均人数
-zone_flow = people_flow_df.groupby(['dateObservedFrom', 'Zone'])['peopleCount'].mean().reset_index()
-zone_pivot = zone_flow.pivot(index='dateObservedFrom', columns='Zone', values='peopleCount')
-
-# 3. ターゲットとする「駅前(A) ⇔ 藤崎(C)」間のポテンシャル計算
-# ゾーン間の距離計算 (Haversine)
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371000
+# 3. 距離計算関数の定義（ハバーサイン公式）
+def haversine_distance(lat1, lon1, lat2, lon2):
+    R = 6371000  # 地球の半径 (メートル)
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
     dphi = np.radians(lat2 - lat1)
     dlambda = np.radians(lon2 - lon1)
-    a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
-    return 2 * R * np.arctan2(np.sqrt(a), np.sqrt(1-a))
+    a = np.sin(dphi/2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda/2)**2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    return R * c
 
-loc_a = zone_loc[zone_loc['Zone'] == 'Zone A: 駅前(ハピナ)'].iloc[0]
-loc_c = zone_loc[zone_loc['Zone'] == 'Zone C: 藤崎(マーブル)'].iloc[0]
-dist_ac = haversine(loc_a['緯度'], loc_a['経度'], loc_c['緯度'], loc_c['経度'])
+# 4. 計算対象とする隣接ペア（エッジ）の定義
+edges = [
+    # ハピナ名掛丁
+    ('ハピナ名掛丁商店街・東', 'ハピナ名掛丁商店街・西'),
+    # 接続：ハピナ - クリスロード
+    ('ハピナ名掛丁商店街・西', 'クリスロード商店街・中央'),
+    # クリスロード
+    ('クリスロード商店街・中央', 'クリスロード商店街・西'),
+    # 接続：クリスロード - マーブルロード
+    ('クリスロード商店街・西', 'マーブルロードおおまち商店街・東'),
+    # マーブルロード
+    ('マーブルロードおおまち商店街・東', 'マーブルロードおおまち商店街・西'),
+    
+    # --- 指定のT字路（ぶらんど～む一番町商店街・南）周辺 ---
+    ('マーブルロードおおまち商店街・西', 'ぶらんど～む一番町商店街・南'),
+    ('ぶらんど～む一番町商店街・南', 'サンモール一番町商店街・中央'),
+    ('ぶらんど～む一番町商店街・南', 'ぶらんど～む一番町商店街・北'),
+    # ---------------------------------------------------
 
-print(f"Zone A(駅前) - Zone C(藤崎) 間の代表距離: {dist_ac:.1f} m")
+    # サンモール一番町
+    ('サンモール一番町商店街・中央', 'サンモール一番町商店街・南'),
+    # 接続：ぶらんど～む - 一番町四丁目
+    ('ぶらんど～む一番町商店街・北', '一番町四丁目商店街・南'),
+    # 一番町四丁目
+    ('一番町四丁目商店街・南', '一番町四丁目商店街・中央'),
+    ('一番町四丁目商店街・中央', '一番町四丁目商店街・北')
+]
 
-# ポテンシャル計算
-# モデル1: 距離抵抗あり (Mass * Mass / Distance) ※2乗ではなく1乗に緩和
-potential_linear = (zone_pivot['Zone A: 駅前(ハピナ)'] * zone_pivot['Zone C: 藤崎(マーブル)']) / dist_ac
+# 5. 重力モデルによる交通量予測計算
+# まず各エッジ間の距離を計算
+edge_dists = {}
+for u, v in edges:
+    if u in locations['LocationName'].values and v in locations['LocationName'].values:
+        c1 = locations[locations['LocationName'] == u].iloc[0]
+        c2 = locations[locations['LocationName'] == v].iloc[0]
+        dist = haversine_distance(c1['Latitude'], c1['Longitude'], c2['Latitude'], c2['Longitude'])
+        edge_dists[(u,v)] = dist
+    else:
+        print(f"Skipping edge {u}-{v}, location missing.")
 
-# モデル2: 距離抵抗なし (Mass * Mass) ※純粋な「需要の総量」
-potential_mass = (zone_pivot['Zone A: 駅前(ハピナ)'] * zone_pivot['Zone C: 藤崎(マーブル)'])
+# 計算実行: (Pi * Pj) / dist^1
+edge_flow_df = pd.DataFrame(index=df_pivot.index)
 
-# 4. 可視化 (2025-01-11の土曜日を例に)
-plot_data = pd.DataFrame({
-    'Model 1 (Linear Decay)': potential_linear,
-    'Model 2 (No Decay)': potential_mass / 1000 # スケール調整
-})
-subset = plot_data['2025-01-11']
+for (u, v), dist in edge_dists.items():
+    if dist > 0:
+        # 重力モデル式
+        flow = (df_pivot[u] * df_pivot[v]) / dist
+        
+        # カラム名を "地点A - 地点B" として保存
+        edge_name = f"{u} - {v}"
+        edge_flow_df[edge_name] = flow
 
-plt.figure(figsize=(12, 6))
-sns.lineplot(data=subset)
-plt.title('Potential Analysis: Station Zone vs Fujisaki Zone (2025-01-11)')
-plt.ylabel('Interaction Score')
-plt.xlabel('Time')
-plt.grid(True)
-plt.show()
+# 6. CSVファイルとして出力
+edge_flow_df.to_csv('arcade_gravity_flow.csv')
+print("Saved to arcade_gravity_flow.csv")
